@@ -1,84 +1,60 @@
-# Copyright (c) Streamlit Inc. (2018-2022) Snowflake Inc. (2022)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-from typing import Any
-
-import numpy as np
-
 import streamlit as st
-from streamlit.hello.utils import show_code
+import pandas as pd
+from lifelines import CoxPHFitter
+from sklearn.preprocessing import StandardScaler
+
+# Título de la aplicación
+st.title('Modelo de Supervivencia para Préstamos')
+
+# Carga de datos
+st.header('Carga de Datos')
+uploaded_file = st.file_uploader("Elige un archivo de Excel", type=['xlsx'])
+if uploaded_file is not None:
+    data = pd.read_excel(uploaded_file)
+    st.write(data.head())  # Mostrar las primeras filas de los datos
+
+    # Asegurando que 'PorcentajeDesembolsado' esté en formato adecuado y creando 'Evento'
+    data['Evento'] = (data['PorcentajeDesembolsado'] < 1).astype(int)
+
+    # Preparar el DataFrame para el modelo, excluyendo 'NoOperacion'
+    data_prepared = data[['Meses', 'Evento']].copy()
+    data_prepared = pd.concat([data_prepared, pd.get_dummies(data[['Sector', 'SubSectorNombre','Pais']], drop_first=True)], axis=1)
+
+    # Asegurarse de que 'Años' es numérico (no debería haber errores de tipo si 'Años' ya es numérico)
+    data_prepared['Meses'] = pd.to_numeric(data_prepared['Meses'], errors='coerce')
+    
+    # Normalizar las variables numéricas (excepto la columna 'Evento')
+    scaler = StandardScaler()
+    columns_to_scale = ['Meses']  # Añade aquí otras columnas numéricas si las hay
+    data_prepared[columns_to_scale] = scaler.fit_transform(data_prepared[columns_to_scale])
+    
+    # Ajustar el modelo de supervivencia con regularización
+    cox_model = CoxPHFitter(penalizer=0.1)  # Ajusta el valor del penalizador según sea necesario
+    cox_model.fit(data_prepared, duration_col='Meses', event_col='Evento')
+
+    # Mostrar el resumen del modelo
+    st.write(cox_model.summary)
+
+    import matplotlib.pyplot as plt
+    from lifelines import KaplanMeierFitter
+
+    # Asumiendo que 'Tiempo' es la duración hasta el evento y 'Evento' es si se alcanzó el 100% del desembolso (1 si sí, 0 si no)
+    kmf = KaplanMeierFitter()
+
+    # Ajusta el modelo de Kaplan-Meier a los datos
+    kmf.fit(data['Meses'], event_observed=data['Evento'])
+
+    # Crear y mostrar la curva de supervivencia Kaplan-Meier
+    kmf = KaplanMeierFitter()
+    kmf.fit(data['Años'], event_observed=data['Evento'])
+
+    # Crea la figura para el gráfico
+    fig, ax = plt.subplots()
+    kmf.plot(ax=ax)
+    ax.set_title('Curva de Supervivencia de Kaplan-Meier')
+    ax.set_xlabel('Tiempo')
+    ax.set_ylabel('Probabilidad de no haber alcanzado el 100% del desembolso')
+    # Mostrar el gráfico en Streamlit
+    st.pyplot(fig)
 
 
-def animation_demo() -> None:
-
-    # Interactive Streamlit elements, like these sliders, return their value.
-    # This gives you an extremely simple interaction model.
-    iterations = st.sidebar.slider("Level of detail", 2, 20, 10, 1)
-    separation = st.sidebar.slider("Separation", 0.7, 2.0, 0.7885)
-
-    # Non-interactive elements return a placeholder to their location
-    # in the app. Here we're storing progress_bar to update it later.
-    progress_bar = st.sidebar.progress(0)
-
-    # These two elements will be filled in later, so we create a placeholder
-    # for them using st.empty()
-    frame_text = st.sidebar.empty()
-    image = st.empty()
-
-    m, n, s = 960, 640, 400
-    x = np.linspace(-m / s, m / s, num=m).reshape((1, m))
-    y = np.linspace(-n / s, n / s, num=n).reshape((n, 1))
-
-    for frame_num, a in enumerate(np.linspace(0.0, 4 * np.pi, 100)):
-        # Here were setting value for these two elements.
-        progress_bar.progress(frame_num)
-        frame_text.text("Frame %i/100" % (frame_num + 1))
-
-        # Performing some fractal wizardry.
-        c = separation * np.exp(1j * a)
-        Z = np.tile(x, (n, 1)) + 1j * np.tile(y, (1, m))
-        C = np.full((n, m), c)
-        M: Any = np.full((n, m), True, dtype=bool)
-        N = np.zeros((n, m))
-
-        for i in range(iterations):
-            Z[M] = Z[M] * Z[M] + C[M]
-            M[np.abs(Z) > 2] = False
-            N[M] = i
-
-        # Update the image placeholder by calling the image() function on it.
-        image.image(1.0 - (N / N.max()), use_column_width=True)
-
-    # We clear elements by calling empty on them.
-    progress_bar.empty()
-    frame_text.empty()
-
-    # Streamlit widgets automatically run the script from top to bottom. Since
-    # this button is not connected to any other logic, it just causes a plain
-    # rerun.
-    st.button("Re-run")
-
-
-st.set_page_config(page_title="Animation Demo", page_icon="📹")
-st.markdown("# Animation Demo")
-st.sidebar.header("Animation Demo")
-st.write(
-    """This app shows how you can use Streamlit to build cool animations.
-It displays an animated fractal based on the the Julia Set. Use the slider
-to tune different parameters."""
-)
-
-animation_demo()
-
-show_code(animation_demo)
